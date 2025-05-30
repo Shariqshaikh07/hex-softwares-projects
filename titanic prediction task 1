@@ -1,0 +1,81 @@
+# Titanic Survival Prediction
+
+This project builds an ensemble model to predict passenger survival on the Titanic using data cleaning, feature engineering, and machine learning.
+## 1. Import Libraries
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import joblib
+
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
+from sklearn.ensemble import VotingClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+## 2. Helper Function
+def extract_title(name_series):
+    titles = name_series.str.extract(' ([A-Za-z]+)\.', expand=False)
+    titles = titles.replace(['Lady', 'Countess','Capt','Col','Don','Dr','Major','Rev','Sir','Jonkheer','Dona'], 'Rare')
+    titles = titles.replace(['Mlle', 'Ms'], 'Miss')
+    titles = titles.replace('Mme', 'Mrs')
+    return titles
+## 3. Load Data
+train_df = pd.read_csv("../data/train.csv")
+test_df = pd.read_csv("../data/test.csv")
+df = train_df.copy()
+
+print(df.head())
+print(df.info())
+## 4. Data Cleaning
+df['Age'].fillna(df['Age'].median(), inplace=True)
+df['Embarked'].fillna(df['Embarked'].mode()[0], inplace=True)
+df.drop(columns=['Cabin', 'Ticket'], inplace=True)
+## 5. Feature Engineering
+df['FamilySize'] = df['SibSp'] + df['Parch']
+df['IsAlone'] = (df['FamilySize'] == 0).astype(int)
+df['Title'] = extract_title(df['Name'])
+df.drop(['Name', 'PassengerId'], axis=1, inplace=True)
+## 6. Label Encoding
+le = LabelEncoder()
+df['Sex'] = le.fit_transform(df['Sex'])
+df['Embarked'] = le.fit_transform(df['Embarked'])
+df['Title'] = le.fit_transform(df['Title'])
+## 7. Split Data
+X = df.drop("Survived", axis=1)
+y = df['Survived']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+## 8. Model Training and Evaluation
+model1 = LogisticRegression(max_iter=1000)
+model2 = RandomForestClassifier(n_estimators=200, random_state=42)
+model3 = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
+
+# Evaluate individual models
+for name, model in [('Logistic Regression', model1), ('Random Forest', model2), ('XGBoost', model3)]:
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    print(f"{name} Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+
+# Ensemble Voting
+ensemble = VotingClassifier(estimators=[
+    ('lr', model1),
+    ('rf', model2),
+    ('xgb', model3)
+], voting='soft')
+
+ensemble.fit(X_train, y_train)
+y_pred = ensemble.predict(X_test)
+print("Ensemble Accuracy:", accuracy_score(y_test, y_pred))
+print(classification_report(y_test, y_pred))
+
+sns.heatmap(confusion_matrix(y_test, y_pred), annot=True, fmt='d')
+plt.title("Confusion Matrix")
+plt.show()
+## 9. Cross Validation
+scores = cross_val_score(ensemble, X, y, cv=5)
+print(f"Cross-validated accuracy: {scores.mean():.4f}")
+## 10. Save Model
+joblib.dump(ensemble, "ensemble_model.pkl")
